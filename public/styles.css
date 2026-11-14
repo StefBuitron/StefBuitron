@@ -1,0 +1,52 @@
+:root {
+  --bg: #fafafa; --fg: #161823; --muted: #6b6f7b; --card: #fff; --line: #e6e6ea;
+  --accent: #fe2c55; --accent2: #25f4ee; --ok: #0a7d4f; --err: #c4122f;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #0f0f12; --fg: #f1f1f2; --muted: #a1a3ab; --card: #1a1b20; --line: #2b2c33; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--fg); }
+a { color: inherit; }
+main { max-width: 1100px; margin: 0 auto; padding: 16px; }
+.top { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--line); background: var(--card); position: sticky; top: 0; z-index: 1; }
+.brand { font-weight: 800; font-size: 1.25rem; text-decoration: none; }
+.top nav { display: flex; gap: 12px; align-items: center; }
+.tiktok-link { font-weight: 600; text-decoration: none; border-bottom: 2px solid var(--accent2); }
+.foot { text-align: center; color: var(--muted); padding: 32px 16px; font-size: .9rem; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 14px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; text-decoration: none; transition: transform .15s; }
+.card:hover { transform: translateY(-2px); }
+.card img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
+.card-body { padding: 10px 12px; }
+.card h3 { font-size: .95rem; margin: 0 0 4px; font-weight: 600; }
+.price { margin: 0; font-weight: 700; }
+.price.big { font-size: 1.5rem; margin: 8px 0 16px; }
+.tag { font-size: .75rem; background: var(--line); padding: 2px 8px; border-radius: 99px; font-weight: 600; }
+.product { display: grid; grid-template-columns: 1fr; gap: 24px; }
+.product img { width: 100%; border-radius: 12px; max-height: 70vh; object-fit: contain; background: var(--card); }
+.product h1 { margin: 0; }
+.desc { margin-bottom: 20px; color: var(--fg); }
+@media (min-width: 760px) { .product { grid-template-columns: 1fr 1fr; } }
+.btn { display: inline-block; background: var(--accent); color: #fff; border: 0; border-radius: 10px; padding: 12px 20px; font-weight: 700; font-size: 1rem; text-decoration: none; cursor: pointer; }
+.btn:hover { filter: brightness(1.08); }
+.empty { text-align: center; color: var(--muted); padding: 60px 0; }
+.panel { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px; margin-bottom: 18px; }
+.panel.narrow { max-width: 380px; margin: 40px auto; }
+.panel h1, .panel h2 { margin-top: 0; }
+label { display: block; margin-bottom: 14px; font-weight: 600; }
+input[type=text], input[type=number], input[type=password], textarea { display: block; width: 100%; margin-top: 6px; padding: 10px 12px; font: inherit; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); }
+.drop { border: 2px dashed var(--line); border-radius: 12px; padding: 22px; text-align: center; cursor: pointer; position: relative; }
+.drop input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.drop span { color: var(--muted); }
+#preview { display: none; max-height: 240px; margin: 12px auto 0; border-radius: 8px; }
+details { margin-bottom: 14px; } summary { cursor: pointer; color: var(--muted); margin-bottom: 8px; }
+code { background: var(--bg); border: 1px solid var(--line); padding: 2px 6px; border-radius: 6px; word-break: break-all; }
+.list { width: 100%; border-collapse: collapse; }
+.list td { padding: 8px; border-top: 1px solid var(--line); vertical-align: middle; }
+.thumb { width: 56px; height: 56px; object-fit: cover; border-radius: 8px; display: block; }
+.inline { display: inline; }
+button.link { background: none; border: 0; padding: 0; font: inherit; color: var(--fg); text-decoration: underline; cursor: pointer; margin-right: 10px; }
+button.link.danger { color: var(--err); }
+.error { background: color-mix(in srgb, var(--err) 12%, transparent); color: var(--err); padding: 10px 14px; border-radius: 8px; }
+.ok { background: color-mix(in srgb, var(--ok) 12%, transparent); color: var(--ok); padding: 10px 14px; border-radius: 8px; }

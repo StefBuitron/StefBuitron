@@ -1,0 +1,17 @@
+{
+  "name": "tienda-tiktok",
+  "version": "1.0.0",
+  "description": "Tienda en línea mínima: subes foto + descripción y el catálogo se sincroniza con TikTok.",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "node --test"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "express": "^5.1.0",
+    "multer": "^2.0.2"
+  }
+}
