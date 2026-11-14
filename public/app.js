@@ -121,6 +121,32 @@
     }
   });
 
+  // ----- Compresión de fotos antes de subirlas -----
+  // Las fotos del celular pesan 3–8 MB; se reducen a ~1600 px (unos 300 KB):
+  // suben más rápido con datos móviles y ocupan menos espacio en el servidor.
+  function compress(input) {
+    var f = input.files && input.files[0];
+    var max = Number(input.getAttribute('data-compress')) || 1600;
+    if (!f || !/^image\/(jpeg|png|webp)$/.test(f.type) || f.size < 600 * 1024 || !window.createImageBitmap || !window.DataTransfer) return;
+    createImageBitmap(f).then(function (bmp) {
+      var scale = Math.min(1, max / Math.max(bmp.width, bmp.height));
+      var c = document.createElement('canvas');
+      c.width = Math.round(bmp.width * scale); c.height = Math.round(bmp.height * scale);
+      var ctx = c.getContext('2d');
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+      ctx.drawImage(bmp, 0, 0, c.width, c.height);
+      c.toBlob(function (blob) {
+        if (!blob || blob.size >= f.size) return;
+        var dt = new DataTransfer();
+        dt.items.add(new File([blob], f.name.replace(/\.\w+$/, '') + '.jpg', { type: 'image/jpeg' }));
+        input.files = dt.files;
+      }, 'image/jpeg', 0.85);
+    }).catch(function () {});
+  }
+  document.addEventListener('change', function (e) {
+    if (e.target.type === 'file' && e.target.hasAttribute('data-compress')) compress(e.target);
+  });
+
   // ----- Carrusel -----
   function carousel(root) {
     var track = root.querySelector('.slides'), dots = $$('.dots button', root), slides = $$('.slide', root);

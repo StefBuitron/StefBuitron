@@ -8,6 +8,7 @@ const shop = require('./lib/views/shop');
 const adminViews = require('./lib/views/admin');
 const { openDb, deriveTitle } = require('./lib/store');
 const { buildCsv } = require('./lib/tiktok-feed');
+const { parseTiktokLinks } = require('./lib/media');
 const { ORDER_STATUS, CUSTOM_STATUS, normalizePhone, buildOrder, str } = require('./lib/peru');
 
 // ---------- Subida de imágenes ----------
@@ -23,11 +24,29 @@ function imageUpload(dir) {
       EXT[file.mimetype] ? cb(null, true) : cb(new Error('La imagen debe ser JPG, PNG o WebP.')),
   });
 }
+// Subida de producto: foto + video corto opcional.
+const VIDEO_EXT = { 'video/mp4': '.mp4', 'video/webm': '.webm', 'video/quicktime': '.mov' };
+const MAX_PHOTO = 8 * 1024 * 1024;
+function productMediaUpload(dir) {
+  return multer({
+    storage: multer.diskStorage({
+      destination: dir,
+      filename: (req, file, cb) => cb(null, crypto.randomBytes(12).toString('hex') + (EXT[file.mimetype] || VIDEO_EXT[file.mimetype])),
+    }),
+    limits: { fileSize: 50 * 1024 * 1024, files: 2, fields: 60 },
+    fileFilter: (req, file, cb) => {
+      if (file.fieldname === 'photo') return EXT[file.mimetype] ? cb(null, true) : cb(new Error('La foto debe ser JPG, PNG o WebP.'));
+      if (file.fieldname === 'video') return VIDEO_EXT[file.mimetype] ? cb(null, true) : cb(new Error('El video debe ser MP4, WebM o MOV.'));
+      cb(new Error('Archivo no esperado.'));
+    },
+  });
+}
 const run = (mw, req, res) => new Promise((resolve) => mw(req, res, (err) => resolve(err)));
-const uploadError = (err) => (err.code === 'LIMIT_FILE_SIZE' ? 'La imagen pesa más de 8 MB.' : err.message);
+const uploadError = (err) =>
+  err.code === 'LIMIT_FILE_SIZE' ? (err.field === 'video' ? 'El video pesa más de 50 MB.' : 'La imagen pesa más de 8 MB.') : err.message;
 const rmFile = (dir, name) => name && fs.rm(path.join(dir, path.basename(name)), { force: true }, () => {});
 
-function createApp(db = openDb(cfg.dataDir)) {
+function createApp(db = openDb(cfg.dataDir), { fetchImpl = fetch } = {}) {
   const app = express();
   app.disable('x-powered-by');
   app.use(express.urlencoded({ extended: false, limit: '100kb' }));
@@ -62,16 +81,32 @@ function createApp(db = openDb(cfg.dataDir)) {
     custom: db.customRequests.items.filter((r) => r.status === 'nuevo').length,
   });
 
+  // ---------- Catálogo con calificaciones ----------
+  const publishedReviews = () => db.reviews.all().filter((r) => r.status === 'publicada');
+  const catalog = () => {
+    const stats = {};
+    for (const r of publishedReviews()) {
+      const s = (stats[r.productId] = stats[r.productId] || { sum: 0, count: 0 });
+      s.sum += r.rating;
+      s.count += 1;
+    }
+    return db.products.all().map((p) => {
+      const s = stats[p.id];
+      return s ? { ...p, rating: { avg: Math.round((s.sum / s.count) * 10) / 10, count: s.count } } : p;
+    });
+  };
+
   // ---------- Tienda pública ----------
-  app.get('/', (req, res) => res.send(shop.home(db.products.all(), db.settings.get())));
+  app.get('/', (req, res) => res.send(shop.home(catalog(), db.settings.get(), publishedReviews().slice(0, 8))));
+  app.get('/videos', (req, res) => res.send(shop.videosPage(catalog())));
 
   app.get('/productos', (req, res) => {
     const cat = cfg.categories.includes(req.query.categoria) ? req.query.categoria : '';
-    res.send(shop.productsPage(db.products.all(), cat));
+    res.send(shop.productsPage(catalog(), cat));
   });
-  app.get('/categorias', (req, res) => res.send(shop.categoriesPage(db.products.all())));
-  app.get('/ofertas', (req, res) => res.send(shop.offersPage(db.products.all())));
-  app.get('/buscar', (req, res) => res.send(shop.searchPage(db.products.all(), str(req.query.q, 80))));
+  app.get('/categorias', (req, res) => res.send(shop.categoriesPage(catalog())));
+  app.get('/ofertas', (req, res) => res.send(shop.offersPage(catalog())));
+  app.get('/buscar', (req, res) => res.send(shop.searchPage(catalog(), str(req.query.q, 80))));
   app.get('/soporte', (req, res) => res.send(shop.supportPage(db.settings.get())));
 
   // Favoritos y "Mis pedidos" se guardan en el celular del cliente y se
@@ -79,7 +114,8 @@ function createApp(db = openDb(cfg.dataDir)) {
   const idList = (q) => String(q || '').split(',').filter((x) => /^[a-f0-9]{12,32}$/.test(x)).slice(0, 100);
   app.get('/favoritos', (req, res) => {
     const ids = idList(req.query.ids);
-    res.send(shop.favoritesPage(ids.map((id) => db.products.get(id)).filter(Boolean), ids.length > 0));
+    const all = catalog();
+    res.send(shop.favoritesPage(ids.map((id) => all.find((p) => p.id === id)).filter(Boolean), ids.length > 0));
   });
   app.get('/mis-pedidos', (req, res) => {
     const orders = idList(req.query.ids).map((id) => db.orders.get(id)).filter(Boolean);
@@ -94,13 +130,12 @@ function createApp(db = openDb(cfg.dataDir)) {
   });
 
   app.get('/producto/:id', (req, res) => {
-    const p = db.products.get(req.params.id);
+    const all = catalog();
+    const p = all.find((x) => x.id === req.params.id);
     if (!p) return res.status(404).send(shop.notFound('Ese producto no existe.'));
-    const related = db.products
-      .all()
-      .filter((x) => x.id !== p.id && x.inStock && x.category === p.category)
-      .slice(0, 8);
-    res.send(shop.productPage(p, related));
+    const related = all.filter((x) => x.id !== p.id && x.inStock && x.category === p.category).slice(0, 8);
+    const reviews = publishedReviews().filter((r) => r.productId === p.id);
+    res.send(shop.productPage(p, related, reviews));
   });
 
   app.get('/carrito', (req, res) => res.send(shop.cartPage(db.settings.get())));
@@ -117,14 +152,22 @@ function createApp(db = openDb(cfg.dataDir)) {
   app.get('/pedido/:id', (req, res) => {
     const o = db.orders.get(req.params.id);
     if (!o) return res.status(404).send(shop.notFound('Ese pedido no existe.'));
-    res.send(shop.orderPage(o, db.settings.get(), { isNew: req.query.nuevo === '1', uploaded: req.query.ok === '1' }));
+    res.send(
+      shop.orderPage(o, db.settings.get(), {
+        isNew: req.query.nuevo === '1',
+        uploaded: req.query.ok === '1',
+        reviewed: req.query.gracias === '1',
+        reviews: db.reviews.items.filter((r) => r.orderId === o.id),
+      })
+    );
   });
 
   app.post('/pedido/:id/comprobante', async (req, res) => {
     const o = db.orders.get(req.params.id);
     if (!o) return res.status(404).send(shop.notFound('Ese pedido no existe.'));
     const err = await run(privateUpload.single('voucher'), req, res);
-    const fail = (msg) => res.status(400).send(shop.orderPage(o, db.settings.get(), { error: msg }));
+    const fail = (msg) =>
+      res.status(400).send(shop.orderPage(o, db.settings.get(), { error: msg, reviews: db.reviews.items.filter((r) => r.orderId === o.id) }));
     if (err) return fail(uploadError(err));
     if (!req.file) return fail('Elige la imagen de tu comprobante.');
     if (!['pendiente', 'por_verificar'].includes(o.status)) {
@@ -134,6 +177,37 @@ function createApp(db = openDb(cfg.dataDir)) {
     rmFile(db.privateDir, o.voucher);
     db.orders.update(o.id, { voucher: req.file.filename, status: 'por_verificar' });
     res.redirect(303, `/pedido/${o.id}?ok=1`);
+  });
+
+  // Reseñas: solo quien recibió su pedido puede calificar sus productos.
+  app.post('/pedido/:id/resena', async (req, res) => {
+    const o = db.orders.get(req.params.id);
+    if (!o) return res.status(404).send(shop.notFound('Ese pedido no existe.'));
+    const err = await run(publicUpload.single('photo'), req, res);
+    const own = () => db.reviews.items.filter((r) => r.orderId === o.id);
+    const fail = (msg) => {
+      if (req.file) rmFile(db.uploadsDir, req.file.filename);
+      res.status(400).send(shop.orderPage(o, db.settings.get(), { error: msg, reviews: own() }));
+    };
+    if (err) return fail(uploadError(err));
+    if (o.status !== 'entregado') return fail('Podrás dejar tu reseña cuando recibas tu pedido.');
+    const item = o.items.find((i) => i.productId === req.body.productId);
+    if (!item) return fail('Ese producto no está en tu pedido.');
+    if (own().some((r) => r.productId === item.productId)) return fail('Ya dejaste una reseña para este producto. ¡Gracias!');
+    const rating = Math.trunc(Number(req.body.rating));
+    if (!(rating >= 1 && rating <= 5)) return fail('Elige de 1 a 5 estrellas.');
+    const [first = '', last = ''] = o.customer.name.split(/\s+/);
+    db.reviews.insert({
+      productId: item.productId,
+      productTitle: item.title,
+      orderId: o.id,
+      name: `${first}${last ? ` ${last[0]}.` : ''}`,
+      rating,
+      comment: str(req.body.comment, 1000),
+      photo: req.file ? `/uploads/${req.file.filename}` : '',
+      status: 'publicada',
+    });
+    res.redirect(303, `/pedido/${o.id}?gracias=1#resenas`);
   });
 
   app.get('/personalizados', (req, res) => res.send(shop.customForm()));
@@ -205,7 +279,7 @@ function createApp(db = openDb(cfg.dataDir)) {
   });
 
   // Valida los campos del formulario de producto (crear y editar).
-  const productInput = (b) => {
+  const productInput = async (b) => {
     const description = str(b.description, 10000);
     const price = Number(b.price);
     const before = b.compareAtPrice === '' || b.compareAtPrice == null ? 0 : Number(b.compareAtPrice);
@@ -214,6 +288,8 @@ function createApp(db = openDb(cfg.dataDir)) {
     if (!Number.isFinite(before) || before < 0) return { error: 'El precio antes no es válido.' };
     if (before && before <= price) return { error: 'El “precio antes” debe ser mayor que el precio actual.' };
     if (!cfg.categories.includes(b.category)) return { error: 'Elige una categoría.' };
+    const tiktok = await parseTiktokLinks(b.tiktok, fetchImpl);
+    if (tiktok.error) return { error: tiktok.error };
     return {
       value: {
         title: str(b.title, 255) || deriveTitle(description),
@@ -222,21 +298,40 @@ function createApp(db = openDb(cfg.dataDir)) {
         compareAtPrice: Math.round(before * 100) / 100,
         category: b.category,
         featured: Boolean(b.featured),
+        tiktok: tiktok.ids,
       },
     };
   };
 
+  // Foto (hasta 8 MB) y video opcional (hasta 50 MB) del producto.
+  const productUpload = productMediaUpload(db.uploadsDir).fields([
+    { name: 'photo', maxCount: 1 },
+    { name: 'video', maxCount: 1 },
+  ]);
+  const productFiles = (req) => {
+    const f = req.files || {};
+    return { photo: f.photo && f.photo[0], video: f.video && f.video[0] };
+  };
+  const dropFiles = (files) => Object.values(files).forEach((f) => f && rmFile(db.uploadsDir, f.filename));
+
   app.post('/admin/productos', async (req, res) => {
-    const err = await run(publicUpload.single('photo'), req, res);
+    const err = await run(productUpload, req, res);
+    const files = productFiles(req);
     const fail = (msg) => {
-      if (req.file) rmFile(db.uploadsDir, req.file.filename);
+      dropFiles(files);
       res.status(400).send(adminViews.products(db.products.all(), counts(), { error: msg }));
     };
     if (err) return fail(uploadError(err));
-    if (!req.file) return fail('Falta la foto.');
-    const input = productInput(req.body);
+    if (!files.photo) return fail('Falta la foto.');
+    if (files.photo.size > MAX_PHOTO) return fail('La foto pesa más de 8 MB.');
+    const input = await productInput(req.body);
     if (input.error) return fail(input.error);
-    db.products.insert({ ...input.value, image: `/uploads/${req.file.filename}`, inStock: true });
+    db.products.insert({
+      ...input.value,
+      image: `/uploads/${files.photo.filename}`,
+      video: files.video ? `/uploads/${files.video.filename}` : '',
+      inStock: true,
+    });
     res.redirect(303, '/admin?ok=1');
   });
 
@@ -249,19 +344,25 @@ function createApp(db = openDb(cfg.dataDir)) {
   app.post('/admin/productos/:id/editar', async (req, res) => {
     const p = db.products.get(req.params.id);
     if (!p) return res.redirect(303, '/admin');
-    const err = await run(publicUpload.single('photo'), req, res);
+    const err = await run(productUpload, req, res);
+    const files = productFiles(req);
     const fail = (msg) => {
-      if (req.file) rmFile(db.uploadsDir, req.file.filename);
+      dropFiles(files);
       res.status(400).send(adminViews.editProduct(p, counts(), { error: msg }));
     };
     if (err) return fail(uploadError(err));
-    const input = productInput(req.body);
+    if (files.photo && files.photo.size > MAX_PHOTO) return fail('La foto pesa más de 8 MB.');
+    const input = await productInput(req.body);
     if (input.error) return fail(input.error);
     const changes = { ...input.value };
-    if (req.file) {
+    if (files.photo) {
       const usedInOrders = db.orders.items.some((o) => o.items.some((i) => i.image === p.image));
       if (!usedInOrders) rmFile(db.uploadsDir, p.image);
-      changes.image = `/uploads/${req.file.filename}`;
+      changes.image = `/uploads/${files.photo.filename}`;
+    }
+    if (files.video || req.body.video_remove) {
+      if (p.video) rmFile(db.uploadsDir, p.video);
+      changes.video = files.video ? `/uploads/${files.video.filename}` : '';
     }
     db.products.update(p.id, changes);
     res.redirect(303, '/admin?ok=1');
@@ -323,6 +424,7 @@ function createApp(db = openDb(cfg.dataDir)) {
       db.products.remove(p.id);
       // Las fotos de productos con pedidos se conservan para el historial.
       if (!db.orders.items.some((o) => o.items.some((i) => i.productId === p.id))) rmFile(db.uploadsDir, p.image);
+      rmFile(db.uploadsDir, p.video);
     }
     res.redirect(303, '/admin');
   });
@@ -334,6 +436,24 @@ function createApp(db = openDb(cfg.dataDir)) {
   app.post('/admin/pedidos/:id/estado', (req, res) => {
     if (ORDER_STATUS[req.body.status]) db.orders.update(req.params.id, { status: req.body.status });
     res.redirect(303, '/admin/pedidos?ok=1');
+  });
+
+  app.get('/admin/resenas', (req, res) => {
+    res.send(adminViews.reviews(db.reviews.all(), counts(), { ok: req.query.ok ? 'Reseña actualizada.' : '' }));
+  });
+
+  app.post('/admin/resenas/:id/estado', (req, res) => {
+    if (['publicada', 'oculta'].includes(req.body.status)) db.reviews.update(req.params.id, { status: req.body.status });
+    res.redirect(303, '/admin/resenas?ok=1');
+  });
+
+  app.post('/admin/resenas/:id/borrar', (req, res) => {
+    const r = db.reviews.get(req.params.id);
+    if (r) {
+      db.reviews.remove(r.id);
+      rmFile(db.uploadsDir, r.photo);
+    }
+    res.redirect(303, '/admin/resenas?ok=1');
   });
 
   app.get('/admin/personalizados', (req, res) => {

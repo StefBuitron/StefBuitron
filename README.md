@@ -28,6 +28,12 @@ En computadora el menú pasa al encabezado.
   enlace de pago con tarjeta (Mercado Pago, Izipay, Culqi o Niubiz), costo de delivery en Lima,
   envío a provincia, **envío gratis desde S/ X** y recojo en tienda. Solo los métodos que llenes se muestran al cliente.
 
+- **Videos**: en cada producto pega hasta 3 enlaces de TikTok (se ven dentro de la tienda y no
+  ocupan espacio en tu servidor) o sube un video corto (MP4, hasta 50 MB).
+- **Reseñas**: cuando marcas un pedido como *Entregado*, el cliente puede calificar con estrellas,
+  comentar y subir una foto. Botón “Pedir reseña por WhatsApp” en el pedido; puedes ocultar o borrar reseñas.
+- Las fotos se **comprimen solas** en el celular antes de subirse (de ~5 MB a ~300 KB).
+
 **Para tus clientes**
 - Buscador, categorías, ofertas, favoritos y carrito; compra sin crear cuenta.
 - **Mis pedidos** (ícono de persona): ve sus pedidos hechos en ese celular o busca uno con código + celular.
@@ -35,6 +41,8 @@ En computadora el menú pasa al encabezado.
 - Al pedir, ven exactamente cuánto pagar y a dónde (número de Yape/Plin, QR o cuentas),
   suben la captura del pago y te avisan por WhatsApp con un toque.
 - Formulario de **pedidos personalizados** en `/personalizados`.
+- Página **Videos** (`/videos`) y sección “Míralo en video” en el inicio.
+- Estrellas en cada producto, reseñas con “Compra verificada” y sección “Lo que dicen quienes ya compraron”.
 
 **Conexión con TikTok**
 - `/feeds/tiktok.csv`: catálogo en el formato de *data feed* de TikTok, en soles (PEN).
@@ -42,7 +50,17 @@ En computadora el menú pasa al encabezado.
 - **Pixel de TikTok** (opcional): mide `ViewContent`, `AddToCart`, `PlaceAnOrder` y `SubmitForm`
   para optimizar tus anuncios.
 
-## Ponerla en marcha
+## Publicarla en internet (opción recomendada: Railway)
+
+1. Sube este repositorio a GitHub (ya está) y crea una cuenta en railway.com.
+2. *New Project → Deploy from GitHub repo* → elige este repositorio.
+3. Agrega un **Volume** montado en `/data` y la variable `DATA_DIR=/data`
+   (ahí se guardan productos, pedidos, fotos y videos).
+4. Agrega las variables de `.env.example` (`ADMIN_PASSWORD`, `WHATSAPP_NUMBER`, `TIKTOK_USERNAME`…).
+5. *Settings → Networking → Generate Domain* y pon esa dirección en `BASE_URL`.
+   Si compras un dominio propio (p. ej. `ztef.com`), conéctalo en *Custom Domain*.
+
+## Ponerla en marcha en tu computadora
 
 ```bash
 npm install

@@ -11,15 +11,21 @@ const { createApp } = require('../server');
 const { openDb } = require('../lib/store');
 const { buildCsv } = require('../lib/tiktok-feed');
 const { normalizePhone } = require('../lib/peru');
+const { tiktokId, parseTiktokLinks } = require('../lib/media');
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
 const png = () => new Blob([PNG], { type: 'image/png' });
 const FORM = { 'content-type': 'application/x-www-form-urlencoded' };
 
+// TikTok falso: los enlaces cortos redirigen a un video conocido.
+const fakeFetch = async (url) => ({
+  headers: new Map([['location', url.includes('vm.tiktok.com/ZM') ? 'https://www.tiktok.com/@ztef/video/7412345678901234567?lang=es' : '']]),
+});
+
 async function withServer(fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tienda-'));
   const db = openDb(dir);
-  const server = createApp(db).listen(0);
+  const server = createApp(db, { fetchImpl: fakeFetch }).listen(0);
   const base = `http://127.0.0.1:${server.address().port}`;
   try { await fn(base, db); } finally { server.close(); fs.rmSync(dir, { recursive: true, force: true }); }
 }
@@ -60,7 +66,7 @@ test('celulares peruanos', () => {
 test('el panel está protegido', () => withServer(async (base) => {
   const bad = await fetch(`${base}/admin/entrar`, { method: 'POST', headers: FORM, body: 'password=no' });
   assert.strictEqual(bad.status, 401);
-  for (const p of ['/admin', '/admin/pedidos', '/admin/pagos', '/admin/personalizados', '/admin/archivo/abc.png']) {
+  for (const p of ['/admin', '/admin/pedidos', '/admin/pagos', '/admin/personalizados', '/admin/resenas', '/admin/archivo/abc.png']) {
     assert.strictEqual((await fetch(base + p, { redirect: 'manual' })).status, 302, p);
   }
   assert.strictEqual((await fetch(`${base}/admin/productos`, { method: 'POST', redirect: 'manual' })).status, 302);
@@ -268,6 +274,82 @@ test('portada: imágenes del carrusel', () => withServer(async (base, db) => {
   const home = await (await fetch(`${base}/`)).text();
   assert.match(home, /Nueva <em>colección<\/em>/);
   assert.match(home, /class="dots"/);
+}));
+
+test('enlaces de TikTok', async () => {
+  assert.strictEqual(tiktokId('https://www.tiktok.com/@ztef/video/7412345678901234567?is_from_webapp=1'), '7412345678901234567');
+  assert.strictEqual(tiktokId('https://www.tiktok.com/embed/v2/7412345678901234567'), '7412345678901234567');
+  assert.strictEqual(tiktokId('https://youtube.com/watch?v=1'), null);
+  assert.deepStrictEqual(await parseTiktokLinks('https://vm.tiktok.com/ZMabc/\nhttps://www.tiktok.com/@a/video/7400000000000000001', fakeFetch),
+    { ids: ['7412345678901234567', '7400000000000000001'] });
+  assert.ok((await parseTiktokLinks('https://vm.tiktok.com/nada/', fakeFetch)).error);
+  assert.ok((await parseTiktokLinks('hola', fakeFetch)).error);
+});
+
+test('videos de productos: TikTok y archivo subido', () => withServer(async (base, db) => {
+  const cookie = await login(base);
+  assert.strictEqual((await addProduct(base, cookie, { extra: { tiktok: 'https://example.com/video' } })).status, 400);
+  const f = new FormData();
+  f.append('photo', png(), 'x.png'); f.append('description', 'Bolso con video'); f.append('price', '80'); f.append('category', 'Bolsos');
+  f.append('tiktok', 'https://vm.tiktok.com/ZMabc/');
+  f.append('video', new Blob([Buffer.from('fake-mp4')], { type: 'video/mp4' }), 'v.mp4');
+  assert.strictEqual((await fetch(`${base}/admin/productos`, { method: 'POST', body: f, headers: { cookie }, redirect: 'manual' })).status, 303);
+  const [p] = db.products.all();
+  assert.deepStrictEqual(p.tiktok, ['7412345678901234567']);
+  assert.match(p.video, /^\/uploads\/[a-f0-9]+\.mp4$/);
+  assert.strictEqual((await fetch(base + p.video)).status, 200);
+
+  const page = await (await fetch(`${base}/producto/${p.id}`)).text();
+  assert.match(page, /tiktok\.com\/embed\/v2\/7412345678901234567/);
+  assert.match(page, /<video class="vid" src="\/uploads\//);
+  assert.match(await (await fetch(`${base}/videos`)).text(), /Bolso con video/);
+  assert.match(await (await fetch(`${base}/`)).text(), /Míralo en video/);
+
+  // Un archivo que no es video se rechaza
+  const bad = new FormData();
+  bad.append('photo', png(), 'x.png'); bad.append('description', 'x'); bad.append('price', '1'); bad.append('category', 'Bolsos');
+  bad.append('video', new Blob(['x'], { type: 'application/pdf' }), 'x.pdf');
+  assert.strictEqual((await fetch(`${base}/admin/productos`, { method: 'POST', body: bad, headers: { cookie } })).status, 400);
+  assert.strictEqual(db.products.items.length, 1);
+}));
+
+test('reseñas: solo tras la entrega, una por producto, moderables', () => withServer(async (base, db) => {
+  const cookie = await login(base);
+  await addProduct(base, cookie, { description: 'Hoodie Oversize', price: '70', category: 'Ropa' });
+  await configurePayments(base, cookie);
+  const [p] = db.products.all();
+  await checkout(base, { name: 'Ana María Pérez', phone: '987111222', shipping: 'lima', address: 'x', district: 'y', payment: 'yape', items: JSON.stringify([{ id: p.id, qty: 1 }]) });
+  const [o] = db.orders.all();
+  const review = (fields, file) => {
+    const f = new FormData();
+    for (const [k, v] of Object.entries(fields)) f.append(k, v);
+    if (file) f.append('photo', png(), 'yo.png');
+    return fetch(`${base}/pedido/${o.id}/resena`, { method: 'POST', body: f, redirect: 'manual' });
+  };
+
+  assert.strictEqual((await review({ productId: p.id, rating: '5' })).status, 400); // aún no entregado
+  await fetch(`${base}/admin/pedidos/${o.id}/estado`, { method: 'POST', headers: { ...FORM, cookie }, body: 'status=entregado', redirect: 'manual' });
+  assert.match(await (await fetch(`${base}/pedido/${o.id}`)).text(), /¿Qué te pareció tu compra\?/);
+  assert.match(await (await fetch(`${base}/admin/pedidos`, { headers: { cookie } })).text(), /Pedir reseña por WhatsApp/);
+
+  assert.strictEqual((await review({ productId: p.id, rating: '9' })).status, 400);
+  assert.strictEqual((await review({ productId: 'otro', rating: '5' })).status, 400);
+  assert.strictEqual((await review({ productId: p.id, rating: '4', comment: 'Me encantó <3' }, true)).status, 303);
+  assert.strictEqual((await review({ productId: p.id, rating: '1' })).status, 400); // duplicada
+
+  const [r] = db.reviews.all();
+  assert.strictEqual(r.name, 'Ana M.');
+  assert.ok(r.photo.startsWith('/uploads/'));
+  const page = await (await fetch(`${base}/producto/${p.id}`)).text();
+  assert.match(page, /4\.0 · 1 reseña/);
+  assert.match(page, /Me encantó &lt;3/);
+  assert.match(page, /Compra verificada/);
+  assert.match(await (await fetch(`${base}/`)).text(), /Lo que dicen quienes ya compraron/);
+
+  await fetch(`${base}/admin/resenas/${r.id}/estado`, { method: 'POST', headers: { ...FORM, cookie }, body: 'status=oculta', redirect: 'manual' });
+  assert.doesNotMatch(await (await fetch(`${base}/producto/${p.id}`)).text(), /Me encantó/);
+  await fetch(`${base}/admin/resenas/${r.id}/borrar`, { method: 'POST', headers: { cookie }, redirect: 'manual' });
+  assert.strictEqual(db.reviews.items.length, 0);
 }));
 
 test('feed marca productos agotados', () => {
