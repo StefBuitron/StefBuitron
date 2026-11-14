@@ -50,3 +50,66 @@ button.link { background: none; border: 0; padding: 0; font: inherit; color: var
 button.link.danger { color: var(--err); }
 .error { background: color-mix(in srgb, var(--err) 12%, transparent); color: var(--err); padding: 10px 14px; border-radius: 8px; }
 .ok { background: color-mix(in srgb, var(--ok) 12%, transparent); color: var(--ok); padding: 10px 14px; border-radius: 8px; }
+
+/* ---------- Tienda Perú ---------- */
+.top nav a { text-decoration: none; font-weight: 600; }
+.top nav a.active { color: var(--accent); }
+.top nav { flex-wrap: wrap; justify-content: flex-end; }
+.badge { display: inline-block; min-width: 20px; padding: 0 6px; border-radius: 99px; background: var(--accent); color: #fff; font-size: .75rem; text-align: center; line-height: 20px; }
+.badge[hidden] { display: none; }
+.cart-link { white-space: nowrap; }
+.chips { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 12px; margin-bottom: 4px; }
+.chip { flex: none; padding: 6px 14px; border-radius: 99px; border: 1px solid var(--line); background: var(--card); text-decoration: none; font-weight: 600; font-size: .9rem; }
+.chip.on { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.chip.small { display: inline-block; font-size: .8rem; padding: 3px 10px; margin-bottom: 8px; }
+.promo { display: block; margin-top: 24px; padding: 18px; border-radius: 12px; text-decoration: none; background: linear-gradient(120deg, color-mix(in srgb, var(--accent) 18%, var(--card)), color-mix(in srgb, var(--accent2) 22%, var(--card))); border: 1px solid var(--line); }
+.promo strong { display: block; font-size: 1.1rem; margin-bottom: 4px; }
+.buy { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 12px; }
+.buy .qty { margin: 0; width: 100px; }
+.btn.ghost { background: transparent; color: var(--fg); border: 1.5px solid var(--line); }
+.btn.small { padding: 6px 12px; font-size: .9rem; }
+.btn.wide { width: 100%; }
+.pay-logos { color: var(--muted); font-size: .9rem; }
+.muted, .hint { color: var(--muted); font-size: .9rem; }
+.panel.narrow-wide { max-width: 620px; margin: 0 auto 18px; }
+.cart-layout { display: grid; gap: 18px; }
+@media (min-width: 860px) { .cart-layout { grid-template-columns: 1fr 1fr; align-items: start; } }
+.cart-layout .panel { margin: 0; }
+.option { display: flex; gap: 10px; align-items: center; font-weight: 500; border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin-bottom: 8px; cursor: pointer; }
+.option:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.option span { flex: 1; display: flex; justify-content: space-between; gap: 8px; }
+[hidden] { display: none !important; }
+.lines { list-style: none; padding: 0; margin: 0 0 12px; }
+.lines li { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.lines li > span { flex: 1; }
+.stepper button { width: 28px; height: 28px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); font-size: 1rem; cursor: pointer; }
+.totals p { display: flex; justify-content: space-between; margin: 6px 0; }
+.totals .total { font-size: 1.25rem; font-weight: 800; border-top: 1px solid var(--line); padding-top: 8px; margin-bottom: 16px; }
+.status { display: inline-block; font-size: .8rem; font-weight: 700; padding: 3px 10px; border-radius: 99px; background: var(--line); }
+.s-pendiente, .s-nuevo { background: #fff1c2; color: #6b4b00; }
+.s-por_verificar, .s-cotizado { background: #ffe0e6; color: #a1102b; }
+.s-pagado, .s-aceptado { background: #d6f5e6; color: #0a5e3b; }
+.s-enviado, .s-entregado, .s-terminado { background: #dbeafe; color: #1e3a8a; }
+.s-cancelado, .s-descartado { background: var(--line); color: var(--muted); }
+.pay .big-number { font-size: 1.4rem; letter-spacing: .5px; }
+.qr { display: block; max-width: 220px; width: 100%; border-radius: 12px; margin: 10px 0; background: #fff; }
+.banks { padding-left: 18px; } .banks li { margin-bottom: 10px; }
+.voucher { margin: 16px 0; }
+.voucher .drop { margin-bottom: 12px; }
+fieldset { border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin: 0 0 16px; }
+legend { font-weight: 800; padding: 0 6px; }
+.row { display: grid; gap: 0 12px; grid-template-columns: 1fr; }
+@media (min-width: 560px) { .row { grid-template-columns: 1fr 1fr; } }
+select { display: block; width: 100%; margin-top: 6px; padding: 10px 12px; font: inherit; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); }
+input[type=tel], input[type=url], input[type=date] { display: block; width: 100%; margin-top: 6px; padding: 10px 12px; font: inherit; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); }
+.check { display: flex; gap: 8px; align-items: center; font-weight: 500; }
+.drop.small { padding: 12px; }
+.bank + .bank { border-top: 1px dashed var(--line); padding-top: 12px; }
+details.order { border: 1px solid var(--line); border-radius: 10px; margin-bottom: 10px; }
+details.order summary { padding: 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0; color: var(--fg); }
+details.order summary small { color: var(--muted); margin-left: auto; }
+.order-body { padding: 0 12px 12px; }
+.voucher-img { max-width: 260px; width: 100%; border-radius: 8px; border: 1px solid var(--line); margin-top: 6px; }
+.status-form { display: flex; gap: 8px; align-items: center; }
+.status-form select { margin: 0; flex: 1; max-width: 260px; }
+.actions { white-space: nowrap; }

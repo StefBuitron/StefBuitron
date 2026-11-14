@@ -1,45 +1,52 @@
-# Tienda TikTok
+# Tienda TikTok · Perú
 
-Una tienda en línea mínima: **subes una foto, escribes la descripción y el precio, y listo**.
-El producto aparece en tu tienda y en tu **catálogo de TikTok**, así puedes etiquetarlo en tus videos y anuncios.
+Tienda en línea mínima para vender en Perú: **subes una foto, escribes la descripción y el precio, y listo**.
+El producto aparece en tu tienda y en tu **catálogo de TikTok**, y tus clientes pagan con
+**Yape, Plin, transferencia bancaria o tarjeta**.
 
-## Cómo funciona
+## Qué incluye
 
-```
- Tú (celular)            Tu tienda                         TikTok
- ───────────            ─────────                         ──────
- /admin  ──foto+desc──▶  guarda producto ──▶ /producto/:id  ◀── clic desde video/anuncio
-                         └──▶ /feeds/tiktok.csv  ◀── TikTok lo lee solo (cada hora/día)
-```
+**Para ti (panel `/admin`, desde el celular)**
+- **Productos**: foto + descripción + precio en soles + categoría (Accesorios, Carteras, Ropa, Vitaminas).
+  La primera línea de la descripción es el título. Marcar agotado / borrar.
+- **Pedidos**: cada compra con su código (P-1001…), datos del cliente, dirección, DNI (provincia),
+  la **captura del pago** que subió el cliente y el estado:
+  Esperando pago → Comprobante por verificar → Pago confirmado → Enviado → Entregado.
+- **Personalizados**: solicitudes de clientes con descripción, foto de referencia, presupuesto y fecha.
+- **Pagos y envíos**: tu número de Yape y Plin (con QR), hasta 4 cuentas bancarias con CCI,
+  enlace de pago con tarjeta (Mercado Pago, Izipay, Culqi o Niubiz), costo de delivery en Lima,
+  envío a provincia y recojo en tienda. Solo los métodos que llenes se muestran al cliente.
 
-- **Panel `/admin`**: foto (se puede tomar con la cámara del celular), descripción y precio.
-  La primera línea de la descripción se usa como título.
-- **Tienda pública `/`**: cuadrícula de productos y página de cada uno, con botón
-  *Comprar por WhatsApp*.
-- **Conexión con TikTok**:
-  - `/feeds/tiktok.csv`: catálogo en el formato de *data feed* de TikTok. Se configura una sola vez
-    en TikTok Catalog Manager (*Catálogos → Agregar productos → Fuente de datos → Programado*)
-    y TikTok descarga los productos nuevos automáticamente.
-  - **Pixel de TikTok** (opcional): mide visitas a productos (`ViewContent`) y clics en
-    comprar (`Contact`) para optimizar anuncios.
-  - Enlace a tu perfil de TikTok en el encabezado.
+**Para tus clientes**
+- Tienda con filtros por categoría, carrito y compra sin crear cuenta.
+- Al pedir, ven exactamente cuánto pagar y a dónde (número de Yape/Plin, QR o cuentas),
+  suben la captura del pago y te avisan por WhatsApp con un toque.
+- Formulario de **pedidos personalizados** en `/personalizados`.
+
+**Conexión con TikTok**
+- `/feeds/tiktok.csv`: catálogo en el formato de *data feed* de TikTok, en soles (PEN).
+  Se configura una vez en TikTok Catalog Manager (*Catálogos → Agregar productos → Fuente de datos → Programado*).
+- **Pixel de TikTok** (opcional): mide `ViewContent`, `AddToCart`, `PlaceAnOrder` y `SubmitForm`
+  para optimizar tus anuncios.
 
 ## Ponerla en marcha
 
 ```bash
 npm install
-cp .env.example .env   # y edita tus datos (contraseña, moneda, TikTok, WhatsApp)
+cp .env.example .env   # edita nombre, contraseña, TikTok y WhatsApp
 npm start
 ```
 
-Abre `http://localhost:3000/admin`. Pruebas: `npm test`.
+Abre `http://localhost:3000/admin` → **Pagos y envíos** para poner tus números y cuentas.
+Pruebas: `npm test`.
 
-Para que TikTok pueda leer el catálogo, la tienda debe estar publicada en internet
-(por ejemplo en Render, Railway o un VPS) y `BASE_URL` debe ser esa dirección pública con `https`.
-Usa un disco persistente para la carpeta `data/`, que es donde se guardan productos y fotos.
+Para que TikTok lea el catálogo, la tienda debe estar publicada en internet (Render, Railway o un VPS)
+con `BASE_URL` en `https`. Usa un disco persistente para `data/` (productos, pedidos, fotos y comprobantes).
 
-## Siguientes pasos posibles
+## Notas
 
-- Pagos en línea (Mercado Pago / Stripe) en vez de WhatsApp.
-- Conexión directa con la API de **TikTok Shop** (requiere cuenta de vendedor aprobada y app de desarrollador).
-- Varias fotos por producto, variantes (talla/color) y categorías.
+- Yape, Plin y transferencias se verifican a mano: el cliente sube su captura y tú confirmas en tu app
+  del banco antes de enviar. Confirmar pagos automáticamente requiere una cuenta comercial
+  (p. ej. Yape Empresas, Mercado Pago o Izipay) y su integración por API.
+- Los comprobantes y fotos de clientes son privados: solo se ven desde el panel.
+- Vender suplementos/vitaminas en Perú requiere que los productos tengan registro sanitario (DIGESA/DIGEMID).
