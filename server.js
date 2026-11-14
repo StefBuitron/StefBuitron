@@ -18,7 +18,7 @@ function imageUpload(dir) {
       destination: dir,
       filename: (req, file, cb) => cb(null, crypto.randomBytes(12).toString('hex') + EXT[file.mimetype]),
     }),
-    limits: { fileSize: 8 * 1024 * 1024, files: 2, fields: 60 },
+    limits: { fileSize: 8 * 1024 * 1024, files: 4, fields: 60 },
     fileFilter: (req, file, cb) =>
       EXT[file.mimetype] ? cb(null, true) : cb(new Error('La imagen debe ser JPG, PNG o WebP.')),
   });
@@ -63,15 +63,44 @@ function createApp(db = openDb(cfg.dataDir)) {
   });
 
   // ---------- Tienda pública ----------
-  app.get('/', (req, res) => {
+  app.get('/', (req, res) => res.send(shop.home(db.products.all(), db.settings.get())));
+
+  app.get('/productos', (req, res) => {
     const cat = cfg.categories.includes(req.query.categoria) ? req.query.categoria : '';
-    res.send(shop.home(db.products.all(), cat));
+    res.send(shop.productsPage(db.products.all(), cat));
+  });
+  app.get('/categorias', (req, res) => res.send(shop.categoriesPage(db.products.all())));
+  app.get('/ofertas', (req, res) => res.send(shop.offersPage(db.products.all())));
+  app.get('/buscar', (req, res) => res.send(shop.searchPage(db.products.all(), str(req.query.q, 80))));
+  app.get('/soporte', (req, res) => res.send(shop.supportPage(db.settings.get())));
+
+  // Favoritos y "Mis pedidos" se guardan en el celular del cliente y se
+  // envían aquí como ?ids=a,b,c para mostrarlos.
+  const idList = (q) => String(q || '').split(',').filter((x) => /^[a-f0-9]{12,32}$/.test(x)).slice(0, 100);
+  app.get('/favoritos', (req, res) => {
+    const ids = idList(req.query.ids);
+    res.send(shop.favoritesPage(ids.map((id) => db.products.get(id)).filter(Boolean), ids.length > 0));
+  });
+  app.get('/mis-pedidos', (req, res) => {
+    const orders = idList(req.query.ids).map((id) => db.orders.get(id)).filter(Boolean);
+    res.send(shop.myOrdersPage(orders));
+  });
+  app.post('/mis-pedidos', (req, res) => {
+    const code = str(req.body.code, 20).toUpperCase().replace(/^P?-?(\d+)$/, 'P-$1');
+    const phone = normalizePhone(req.body.phone);
+    const o = db.orders.items.find((x) => x.code === code && x.customer.phone === phone);
+    if (!o) return res.status(404).send(shop.myOrdersPage([], 'No encontramos un pedido con ese código y celular.'));
+    res.redirect(303, `/pedido/${o.id}`);
   });
 
   app.get('/producto/:id', (req, res) => {
     const p = db.products.get(req.params.id);
     if (!p) return res.status(404).send(shop.notFound('Ese producto no existe.'));
-    res.send(shop.productPage(p));
+    const related = db.products
+      .all()
+      .filter((x) => x.id !== p.id && x.inStock && x.category === p.category)
+      .slice(0, 8);
+    res.send(shop.productPage(p, related));
   });
 
   app.get('/carrito', (req, res) => res.send(shop.cartPage(db.settings.get())));
@@ -175,6 +204,28 @@ function createApp(db = openDb(cfg.dataDir)) {
     res.send(adminViews.products(db.products.all(), counts(), { ok: req.query.ok ? 'Producto publicado.' : '' }));
   });
 
+  // Valida los campos del formulario de producto (crear y editar).
+  const productInput = (b) => {
+    const description = str(b.description, 10000);
+    const price = Number(b.price);
+    const before = b.compareAtPrice === '' || b.compareAtPrice == null ? 0 : Number(b.compareAtPrice);
+    if (!description) return { error: 'Falta la descripción.' };
+    if (!Number.isFinite(price) || price < 0) return { error: 'El precio no es válido.' };
+    if (!Number.isFinite(before) || before < 0) return { error: 'El precio antes no es válido.' };
+    if (before && before <= price) return { error: 'El “precio antes” debe ser mayor que el precio actual.' };
+    if (!cfg.categories.includes(b.category)) return { error: 'Elige una categoría.' };
+    return {
+      value: {
+        title: str(b.title, 255) || deriveTitle(description),
+        description,
+        price: Math.round(price * 100) / 100,
+        compareAtPrice: Math.round(before * 100) / 100,
+        category: b.category,
+        featured: Boolean(b.featured),
+      },
+    };
+  };
+
   app.post('/admin/productos', async (req, res) => {
     const err = await run(publicUpload.single('photo'), req, res);
     const fail = (msg) => {
@@ -182,21 +233,82 @@ function createApp(db = openDb(cfg.dataDir)) {
       res.status(400).send(adminViews.products(db.products.all(), counts(), { error: msg }));
     };
     if (err) return fail(uploadError(err));
-    const description = str(req.body.description, 10000);
-    const price = Number(req.body.price);
     if (!req.file) return fail('Falta la foto.');
-    if (!description) return fail('Falta la descripción.');
-    if (!Number.isFinite(price) || price < 0) return fail('El precio no es válido.');
-    if (!cfg.categories.includes(req.body.category)) return fail('Elige una categoría.');
-    db.products.insert({
-      title: str(req.body.title, 255) || deriveTitle(description),
-      description,
-      price: Math.round(price * 100) / 100,
-      category: req.body.category,
-      image: `/uploads/${req.file.filename}`,
-      inStock: true,
-    });
+    const input = productInput(req.body);
+    if (input.error) return fail(input.error);
+    db.products.insert({ ...input.value, image: `/uploads/${req.file.filename}`, inStock: true });
     res.redirect(303, '/admin?ok=1');
+  });
+
+  app.get('/admin/productos/:id/editar', (req, res) => {
+    const p = db.products.get(req.params.id);
+    if (!p) return res.redirect('/admin');
+    res.send(adminViews.editProduct(p, counts()));
+  });
+
+  app.post('/admin/productos/:id/editar', async (req, res) => {
+    const p = db.products.get(req.params.id);
+    if (!p) return res.redirect(303, '/admin');
+    const err = await run(publicUpload.single('photo'), req, res);
+    const fail = (msg) => {
+      if (req.file) rmFile(db.uploadsDir, req.file.filename);
+      res.status(400).send(adminViews.editProduct(p, counts(), { error: msg }));
+    };
+    if (err) return fail(uploadError(err));
+    const input = productInput(req.body);
+    if (input.error) return fail(input.error);
+    const changes = { ...input.value };
+    if (req.file) {
+      const usedInOrders = db.orders.items.some((o) => o.items.some((i) => i.image === p.image));
+      if (!usedInOrders) rmFile(db.uploadsDir, p.image);
+      changes.image = `/uploads/${req.file.filename}`;
+    }
+    db.products.update(p.id, changes);
+    res.redirect(303, '/admin?ok=1');
+  });
+
+  app.get('/admin/portada', (req, res) => {
+    res.send(adminViews.banners(db.settings.get().banners, counts(), { ok: req.query.ok ? 'Portada guardada.' : '' }));
+  });
+
+  app.post('/admin/portada', async (req, res) => {
+    const fields = Array.from({ length: adminViews.MAX_BANNERS }, (_, i) => ({ name: `banner_${i}_image`, maxCount: 1 }));
+    const upload = publicUpload.fields(fields);
+    const err = await run(upload, req, res);
+    const settings = db.settings.get();
+    const files = req.files || {};
+    const fail = (msg) => {
+      Object.values(files).flat().forEach((f) => rmFile(db.uploadsDir, f.filename));
+      res.status(400).send(adminViews.banners(settings.banners, counts(), { error: msg }));
+    };
+    if (err) return fail(uploadError(err));
+    const b = req.body;
+    const list = [];
+    const removed = [];
+    for (let i = 0; i < adminViews.MAX_BANNERS; i++) {
+      const prev = settings.banners[i] || {};
+      const upl = files[`banner_${i}_image`] && files[`banner_${i}_image`][0];
+      let image = prev.image || '';
+      if (upl || b[`banner_${i}_remove`]) {
+        if (image) removed.push(image);
+        image = upl ? `/uploads/${upl.filename}` : '';
+      }
+      const link = str(b[`banner_${i}_link`], 300);
+      if (link && !/^(\/(?!\/)\S*|https:\/\/\S+)$/.test(link)) {
+        return fail(`El enlace de la imagen ${i + 1} debe empezar con / o https://`);
+      }
+      const banner = {
+        image,
+        title: str(b[`banner_${i}_title`], 60),
+        subtitle: str(b[`banner_${i}_subtitle`], 120),
+        button: str(b[`banner_${i}_button`], 30),
+        link: link || '/productos',
+      };
+      if (banner.image || banner.title || banner.subtitle) list.push(banner);
+    }
+    removed.forEach((img) => rmFile(db.uploadsDir, img));
+    db.settings.set({ ...settings, banners: list });
+    res.redirect(303, '/admin/portada?ok=1');
   });
 
   app.post('/admin/productos/:id/stock', (req, res) => {
@@ -297,6 +409,7 @@ function createApp(db = openDb(cfg.dataDir)) {
 
     const money = (v) => Math.max(0, Math.round((Number(v) || 0) * 100) / 100);
     db.settings.set({
+      ...current,
       yape: yape.value,
       plin: plin.value,
       banks,
@@ -304,6 +417,7 @@ function createApp(db = openDb(cfg.dataDir)) {
       shipping: {
         lima: money(b.ship_lima),
         provincia: money(b.ship_provincia),
+        freeFrom: money(b.ship_free_from),
         pickup: Boolean(b.ship_pickup),
         pickupNote: str(b.ship_pickup_note, 200),
         note: str(b.ship_note, 300),

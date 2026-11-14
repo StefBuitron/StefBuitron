@@ -30,12 +30,13 @@ async function login(base) {
   return r.headers.get('set-cookie').split(';')[0];
 }
 
-async function addProduct(base, cookie, { description = 'Cartera miel', price = '100', category = 'Carteras' } = {}) {
+async function addProduct(base, cookie, { description = 'Cartera miel', price = '100', category = 'Bolsos', extra = {} } = {}) {
   const f = new FormData();
   f.append('photo', png(), 'x.png');
   f.append('description', description);
   f.append('price', price);
   f.append('category', category);
+  for (const [k, v] of Object.entries(extra)) f.append(k, v);
   return fetch(`${base}/admin/productos`, { method: 'POST', body: f, headers: { cookie }, redirect: 'manual' });
 }
 
@@ -70,13 +71,13 @@ test('subir producto lo publica con categoría, en soles y en el feed de TikTok'
   assert.strictEqual((await addProduct(base, cookie, { description: 'Bolso "miel", de piel\nHecho a mano <b>', price: '450' })).status, 303);
   const [p] = db.products.all();
   assert.strictEqual(p.title, 'Bolso "miel", de piel');
-  assert.strictEqual(p.category, 'Carteras');
+  assert.strictEqual(p.category, 'Bolsos');
 
   const page = await (await fetch(`${base}/producto/${p.id}`)).text();
   assert.match(page, /Hecho a mano &lt;b&gt;/);
   assert.match(page, /S\/\s?450\.00/);
-  assert.match(await (await fetch(`${base}/?categoria=Carteras`)).text(), /Bolso/);
-  assert.doesNotMatch(await (await fetch(`${base}/?categoria=Ropa`)).text(), /Bolso/);
+  assert.match(await (await fetch(`${base}/productos?categoria=Bolsos`)).text(), /Bolso &quot;miel/);
+  assert.doesNotMatch(await (await fetch(`${base}/productos?categoria=Ropa`)).text(), /Bolso &quot;miel/);
 
   const csv = await (await fetch(`${base}/feeds/tiktok.csv`)).text();
   assert.ok(csv.includes('"Bolso ""miel"", de piel"'));
@@ -180,6 +181,93 @@ test('pedidos personalizados', () => withServer(async (base, db) => {
   const bad = new FormData();
   bad.append('name', 'X'); bad.append('phone', '123'); bad.append('description', 'algo');
   assert.strictEqual((await fetch(`${base}/personalizados`, { method: 'POST', body: bad })).status, 400);
+}));
+
+test('descuentos: precio antes, ofertas, feed y edición', () => withServer(async (base, db) => {
+  const cookie = await login(base);
+  assert.strictEqual((await addProduct(base, cookie, { price: '100', extra: { compareAtPrice: '90' } })).status, 400);
+  await addProduct(base, cookie, { description: 'Hoodie Oversize', price: '69.90', category: 'Ropa', extra: { compareAtPrice: '99.90', featured: 'on' } });
+  await addProduct(base, cookie, { description: 'Vitamina D3', price: '39.90', category: 'Vitaminas' });
+  const hoodie = db.products.all().find((p) => p.title === 'Hoodie Oversize');
+  assert.strictEqual(hoodie.featured, true);
+
+  const home = await (await fetch(`${base}/`)).text();
+  assert.match(home, /-30%/);
+  assert.match(home, /Hasta<\/span><strong class="pct">30%/);
+  const offers = await (await fetch(`${base}/ofertas`)).text();
+  assert.match(offers, /Hoodie Oversize/);
+  assert.doesNotMatch(offers, /Vitamina D3/);
+
+  const csv = await (await fetch(`${base}/feeds/tiktok.csv`)).text();
+  assert.match(csv, /,99\.90 PEN,69\.90 PEN,/);
+  assert.match(csv, /,Ropa\n/);
+
+  const f = new FormData();
+  f.append('description', 'Hoodie Oversize negro'); f.append('price', '59.90'); f.append('compareAtPrice', '');
+  f.append('category', 'Ropa'); f.append('title', 'Hoodie negro');
+  const r = await fetch(`${base}/admin/productos/${hoodie.id}/editar`, { method: 'POST', body: f, headers: { cookie }, redirect: 'manual' });
+  assert.strictEqual(r.status, 303);
+  const edited = db.products.get(hoodie.id);
+  assert.strictEqual(edited.title, 'Hoodie negro');
+  assert.strictEqual(edited.compareAtPrice, 0);
+  assert.strictEqual(edited.featured, false);
+  assert.strictEqual(edited.image, hoodie.image);
+}));
+
+test('envío gratis desde cierto monto', () => withServer(async (base, db) => {
+  const cookie = await login(base);
+  await addProduct(base, cookie, { price: '60' });
+  await configurePayments(base, cookie, { ship_free_from: '99' });
+  const [p] = db.products.all();
+  const fields = { name: 'Ana', phone: '987111222', shipping: 'lima', address: 'x', district: 'y', payment: 'yape' };
+  await checkout(base, { ...fields, items: JSON.stringify([{ id: p.id, qty: 1 }]) });
+  await checkout(base, { ...fields, items: JSON.stringify([{ id: p.id, qty: 2 }]) });
+  const [second, first] = db.orders.all().sort((a, b) => b.code.localeCompare(a.code));
+  assert.strictEqual(first.total, 70);
+  assert.strictEqual(second.shippingCost, 0);
+  assert.strictEqual(second.total, 120);
+  assert.match(await (await fetch(`${base}/`)).text(), /Envío gratis/);
+}));
+
+test('buscar, favoritos, mis pedidos y páginas del menú', () => withServer(async (base, db) => {
+  const cookie = await login(base);
+  await addProduct(base, cookie, { description: 'Collar dorado con corazón', price: '45', category: 'Joyas' });
+  await configurePayments(base, cookie);
+  const [p] = db.products.all();
+  assert.match(await (await fetch(`${base}/buscar?q=CORAZON`)).text(), /Collar dorado/);
+  assert.doesNotMatch(await (await fetch(`${base}/buscar?q=hoodie`)).text(), /Collar dorado/);
+  assert.match(await (await fetch(`${base}/favoritos?ids=${p.id}`)).text(), /Collar dorado/);
+  for (const path of ['/categorias', '/ofertas', '/soporte', '/favoritos', '/mis-pedidos', '/productos']) {
+    assert.strictEqual((await fetch(base + path)).status, 200, path);
+  }
+  await checkout(base, { name: 'Ana', phone: '987111222', shipping: 'lima', address: 'x', district: 'y', payment: 'yape', items: JSON.stringify([{ id: p.id, qty: 1 }]) });
+  const [o] = db.orders.all();
+  const look = (code, phone) => fetch(`${base}/mis-pedidos`, { method: 'POST', headers: FORM, redirect: 'manual', body: new URLSearchParams({ code, phone }).toString() });
+  const ok = await look('p-1001', '+51 987 111 222');
+  assert.strictEqual(ok.status, 303);
+  assert.strictEqual(ok.headers.get('location'), `/pedido/${o.id}`);
+  assert.strictEqual((await look('1001', '987111222')).status, 303);
+  assert.strictEqual((await look('P-1001', '999999999')).status, 404);
+}));
+
+test('portada: imágenes del carrusel', () => withServer(async (base, db) => {
+  const cookie = await login(base);
+  assert.match(await (await fetch(`${base}/`)).text(), /Tu estilo, tu <em>poder<\/em>/);
+  const f = new FormData();
+  f.append('banner_0_image', png(), 'b.png');
+  f.append('banner_0_title', 'Nueva *colección*');
+  f.append('banner_0_link', '/ofertas');
+  f.append('banner_1_title', 'Vitaminas');
+  f.append('banner_1_link', 'javascript:alert(1)');
+  assert.strictEqual((await fetch(`${base}/admin/portada`, { method: 'POST', body: f, headers: { cookie }, redirect: 'manual' })).status, 400);
+  f.set('banner_1_link', '/productos?categoria=Vitaminas');
+  assert.strictEqual((await fetch(`${base}/admin/portada`, { method: 'POST', body: f, headers: { cookie }, redirect: 'manual' })).status, 303);
+  const { banners } = db.settings.get();
+  assert.strictEqual(banners.length, 2);
+  assert.ok(banners[0].image.startsWith('/uploads/'));
+  const home = await (await fetch(`${base}/`)).text();
+  assert.match(home, /Nueva <em>colección<\/em>/);
+  assert.match(home, /class="dots"/);
 }));
 
 test('feed marca productos agotados', () => {
